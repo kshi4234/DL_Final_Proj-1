@@ -23,19 +23,19 @@ def vicreg_loss(x, y):
     cov_y = (y.T @ y) / (y.shape[0] - 1)
     cov_loss = off_diagonal(cov_x).pow_(2).sum() + off_diagonal(cov_y).pow_(2).sum()
     
-    return sim_loss + 25 * var_loss + 25 * cov_loss
+    return sim_loss + sim_coef * var_loss + cov_coef * cov_loss
 
 def off_diagonal(x):
     n = x.shape[0]
     return x.flatten()[:-1].view(n-1, n+1)[:, 1:].flatten()
 
-def train(epochs=50):  # Increase epochs significantly
+def train(epochs=100):  # 增加训练轮数
     device = torch.device("cuda")
     model = JEPAModel().to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, weight_decay=0.01)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
     
     # Remove scheduler and use custom learning rate adjustment
-    warmup_steps = 1000
+    warmup_steps = 500  # 减少预热步数，加快学习率上升
     total_steps = 0  # Will be set after creating dataloader
     
     # Use extremely small batch size to handle memory constraints
@@ -76,10 +76,10 @@ def train(epochs=50):  # Increase epochs significantly
         for batch_idx, batch in enumerate(pbar_batch):
             # Get current learning rate
             if step < warmup_steps:
-                curr_lr = 2e-4 * step / warmup_steps
+                curr_lr = 1e-4 * step / warmup_steps
             else:
                 progress = (step - warmup_steps) / (total_steps - warmup_steps)
-                curr_lr = 2e-4 * 0.5 * (1 + math.cos(math.pi * progress))
+                curr_lr = 1e-4 * 0.5 * (1 + math.cos(math.pi * progress))
             
             # Update learning rate
             for param_group in optimizer.param_groups:
@@ -95,28 +95,15 @@ def train(epochs=50):  # Increase epochs significantly
                 states = batch.states
                 actions = batch.actions
                 
-                # Add more augmentations
+                # 调整数据增强策略
+                # 移除随机裁剪和重采样，保留位置信息
                 if random.random() < 0.5:
-                    states = torch.flip(states, [3])  # Horizontal flip
-                    actions[:,:,0] = -actions[:,:,0]
-                    
-                if random.random() < 0.3:
-                    # Random crop and resize
-                    b, t, c, h, w = states.shape
-                    states = states.view(-1, c, h, w)
-                    crop_size = random.randint(48, 64)
-                    i = random.randint(0, h - crop_size)
-                    j = random.randint(0, w - crop_size)
-                    states = F.interpolate(
-                        states[:, :, i:i+crop_size, j:j+crop_size],
-                        size=(64, 64),
-                        mode='bilinear'
-                    )
-                    states = states.view(b, t, c, 64, 64)
-                    
-                # Add Gaussian noise
-                if random.random() < 0.3:
-                    states = states + torch.randn_like(states) * 0.01
+                    states = torch.flip(states, [3])  # 水平翻转
+                    actions[:, :, 0] = -actions[:, :, 0]
+                if random.random() < 0.5:
+                    states = torch.flip(states, [4])  # 垂直翻转
+                    actions[:, :, 1] = -actions[:, :, 1]
+                # 移除高斯噪声，避免破坏位置信息
                     
                 B, T, C, H, W = states.shape
                 curr_states = states[:, :-1].contiguous().view(-1, C, H, W)
@@ -151,10 +138,11 @@ def train(epochs=50):  # Increase epochs significantly
                 collision_loss = F.binary_cross_entropy(pred_collision, collision_mask.float())
                 
                 # Combined loss
-                loss = vicreg_loss(pred_next, target_states.detach())
+                loss = vicreg_loss(pred_next, target_states.detach(), sim_coef=25.0, var_coef=25.0, cov_coef=1.0)
                 if pos_loss != 0.0:
-                    loss = loss + 0.1 * pos_loss
-                loss = loss + 0.1 * collision_loss
+                    loss = loss + 0.05 * pos_loss  # 减小位置损失的权重
+                # 移除碰撞损失
+                # loss = loss + 0.1 * collision_loss
                 
                 loss = loss / grad_accum_steps  # Scale loss for accumulation
                 loss.backward()

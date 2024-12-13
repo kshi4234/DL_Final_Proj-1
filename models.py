@@ -137,82 +137,40 @@ class Encoder(nn.Module):
         )
         
         # Initialize position encoding after model is created
-        self.register_buffer('pos_encoding', None)
+        self.positional_embedding = nn.Parameter(torch.zeros(1, 64, 32, 32))
+        nn.init.uniform_(self.positional_embedding, -0.1, 0.1)
         
+        # 调整网络结构以更好地捕获空间特征
         self.layer1 = nn.Sequential(
             ResBlock(64, 128, stride=2),
-            ResBlock(128, 128),
-            SpatialAttention(128)
+            ResBlock(128, 128)
         )
-        
         self.layer2 = nn.Sequential(
             ResBlock(128, 256, stride=2),
-            ResBlock(256, 256),
-            SpatialAttention(256)
+            ResBlock(256, 256)
         )
-        
         self.layer3 = nn.Sequential(
             ResBlock(256, 512, stride=2),
-            ResBlock(512, 512),
-            SpatialAttention(512)
+            ResBlock(512, 512)
         )
         
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        
-        # Add position MLP head
-        self.pos_head = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.LayerNorm(256),
-            nn.LeakyReLU(0.2),
-            nn.Linear(256, 2)  # Predict normalized x,y coordinates
-        )
-        
         self.fc = nn.Sequential(
-            nn.Linear(512 + 2, latent_dim),  # Concat position features
+            nn.Linear(512, latent_dim),
             nn.LayerNorm(latent_dim)
         )
         
-    def _create_pos_encoding(self, x):
-        """Create position encoding matching input feature map size"""
-        _, _, h, w = x.shape  # Get actual dimensions after first conv
-        device = x.device
-        
-        # Create normalized coordinate grid
-        pos_h = torch.arange(h, device=device).float().view(-1, 1).repeat(1, w) / h
-        pos_w = torch.arange(w, device=device).float().view(1, -1).repeat(h, 1) / w
-        pos = torch.stack([pos_h, pos_w], dim=0)  # [2, H, W]
-        pos = pos.unsqueeze(0)  # [1, 2, H, W]
-        
-        # Project to match channel dimension using fixed random projection
-        projection = torch.randn(64, 2, 1, 1, device=device) / math.sqrt(2)
-        pos = F.conv2d(pos, projection, padding=0)  # [1, 64, H, W]
-        
-        return pos
-        
     def forward(self, x):
         x = self.conv1(x)
-        
-        # Create or update position encoding if needed
-        if self.pos_encoding is None or self.pos_encoding.shape[-2:] != x.shape[-2:]:
-            self.pos_encoding = self._create_pos_encoding(x)
-            
-        # Add position encoding
-        x = x + self.pos_encoding.to(x.device)
-        
+        # 添加位置嵌入
+        x = x + self.positional_embedding
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
-        
-        feat = self.avg_pool(x)
-        feat = feat.view(feat.size(0), -1)
-        
-        # Get position prediction
-        pos_pred = self.pos_head(feat)  # Store position prediction
-        
-        # Combine features with position
-        x = torch.cat([feat, pos_pred], dim=1)
+        x = self.avg_pool(x)
+        x = x.view(x.size(0), -1)
         x = self.fc(x)
-        return x  # Only return latent representation for compatibility
+        return x
 
 
 class Predictor(nn.Module):
