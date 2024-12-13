@@ -146,6 +146,15 @@ def train(epochs=1):  # 增加训练轮数
                 
                 accumulated_loss += loss.item() * grad_accum_steps
                 
+                # Print shapes and statistics of key tensors
+                if batch_idx % 100 == 0:
+                    print(f"\nDebug Info for batch {batch_idx}:")
+                    print(f"States shape: {states.shape}, range: [{states.min():.3f}, {states.max():.3f}]")
+                    print(f"Encoded states shape: {pred_states.shape}, range: [{pred_states.min():.3f}, {pred_states.max():.3f}]")
+                    print(f"Target states shape: {target_states.shape}, range: [{target_states.min():.3f}, {target_states.max():.3f}]")
+                    print(f"Predicted next states shape: {pred_next.shape}, range: [{pred_next.min():.3f}, {pred_next.max():.3f}]")
+                    print(f"VICReg loss components - sim: {sim_loss.item():.4f}, var: {var_loss.item():.4f}, cov: {cov_loss.item():.4f}")
+                
                 # Only step optimizer after accumulating gradients
                 if (batch_idx + 1) % grad_accum_steps == 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

@@ -255,13 +255,23 @@ class JEPAModel(nn.Module):
         T = actions.shape[1] + 1
         D = self.repr_dim
         
+        # Add debug prints
+        print(f"\nJEPA Forward Debug Info:")
+        print(f"Input states shape: {states.shape}")
+        print(f"Input actions shape: {actions.shape}")
+        
         # Get initial embedding - remove tuple unpacking
         curr_state = self.encoder(states.squeeze(1))  # [B, D]
+        print(f"Initial encoding shape: {curr_state.shape}")
         predictions = [curr_state]
         
         # Predict future states
         for t in range(T-1):
             curr_state = self.predictor(curr_state, actions[:, t])
+            if t % 5 == 0:  # Print every 5 steps
+                print(f"Step {t} prediction stats - mean: {curr_state.mean():.3f}, std: {curr_state.std():.3f}")
             predictions.append(curr_state)
             
-        return torch.stack(predictions, dim=1)  # [B, T, D]
+        predictions = torch.stack(predictions, dim=1)  # [B, T, D]
+        print(f"Final predictions shape: {predictions.shape}\n")
+        return predictions
