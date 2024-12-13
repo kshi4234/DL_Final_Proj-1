@@ -136,9 +136,7 @@ class Encoder(nn.Module):
             nn.LeakyReLU(0.2, True)
         )
         
-        # Adjust positional embedding to match the output size of conv1
-        self.positional_embedding = nn.Parameter(torch.zeros(1, 64, 33, 33))
-        nn.init.uniform_(self.positional_embedding, -0.1, 0.1)
+        # Remove the fixed positional embedding initialization
         
         # 调整网络结构以更好地捕获空间特征
         self.layer1 = nn.Sequential(
@@ -162,8 +160,11 @@ class Encoder(nn.Module):
         
     def forward(self, x):
         x = self.conv1(x)
-        # 添加位置嵌入
-        x = x + self.positional_embedding
+        B, C, H, W = x.size()
+        device = x.device
+        # Generate positional embeddings dynamically
+        pos_embed = self.create_positional_embedding(C, H, W, device)
+        x = x + pos_embed
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
@@ -172,11 +173,7 @@ class Encoder(nn.Module):
         x = self.fc(x)
         return x
 
-
-class Predictor(nn.Module):
-    def __init__(self, latent_dim=256, action_dim=2):
-        super().__init__()
-        self.net = nn.Sequential(
+    def create_positional_embedding(self, channels, height, width, device):
         y_embed = torch.linspace(0, 1, steps=height, device=device).unsqueeze(1).repeat(1, width)
         x_embed = torch.linspace(0, 1, steps=width, device=device).unsqueeze(0).repeat(height, 1)
         pos_embed = torch.stack((x_embed, y_embed), dim=0)  # Shape: (2, H, W)
