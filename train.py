@@ -107,9 +107,32 @@ def train(epochs=100):  # Increase epochs significantly
                 target_states = model.target_encoder(next_states)
             
             actions_flat = actions.reshape(-1, 2)
-            pred_next = model.predictor(pred_states, actions_flat)
             
-            loss = vicreg_loss(pred_next, target_states.detach())
+            # Get wall channel from states for collision detection
+            wall_channel = states[:, :, 1:2]  # Get wall channel
+            collision_mask = F.max_pool2d(wall_channel.view(-1, 1, H, W), 3, stride=1, padding=1) > 0.5
+            
+            # Calculate auxiliary position loss
+            normalizer = Normalizer()
+            true_positions = batch.locations
+            normalized_positions = normalizer.normalize_location(true_positions)
+            
+            # Get position predictions from encoder
+            all_states = states.view(-1, C, H, W)
+            encoded = model.encoder(all_states)
+            pos_loss = F.mse_loss(encoded[:, -2:], normalized_positions.view(-1, 2))
+            
+            # Collision-aware prediction loss
+            pred_next = model.predictor(pred_states, actions_flat)
+            pred_collision = model.predictor.collision_head(pred_next)
+            collision_loss = F.binary_cross_entropy(pred_collision, collision_mask.float())
+            
+            # Combined loss
+            loss = (
+                vicreg_loss(pred_next, target_states.detach()) + 
+                0.1 * pos_loss +
+                0.1 * collision_loss
+            )
             
             optimizer.zero_grad()
             loss.backward()

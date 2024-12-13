@@ -113,6 +113,19 @@ class ResBlock(nn.Module):
         return out
 
 
+class SpatialAttention(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(channels, 1, kernel_size=1),
+            nn.Sigmoid()
+        )
+    
+    def forward(self, x):
+        attn = self.conv(x)
+        return x * attn
+
+
 class Encoder(nn.Module):
     def __init__(self, latent_dim=256):
         super().__init__()
@@ -122,35 +135,58 @@ class Encoder(nn.Module):
             nn.LeakyReLU(0.2, True)
         )
         
+        # Add position encoding
+        self.pos_encoding = nn.Parameter(torch.randn(1, 64, 32, 32))
+        
         self.layer1 = nn.Sequential(
             ResBlock(64, 128, stride=2),
-            ResBlock(128, 128)
+            ResBlock(128, 128),
+            SpatialAttention(128)
         )
         
         self.layer2 = nn.Sequential(
             ResBlock(128, 256, stride=2),
-            ResBlock(256, 256)
+            ResBlock(256, 256),
+            SpatialAttention(256)
         )
         
         self.layer3 = nn.Sequential(
             ResBlock(256, 512, stride=2),
-            ResBlock(512, 512)
+            ResBlock(512, 512),
+            SpatialAttention(512)
         )
         
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         
+        # Add position MLP head
+        self.pos_head = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.LayerNorm(256),
+            nn.LeakyReLU(0.2),
+            nn.Linear(256, 2)  # Predict normalized x,y coordinates
+        )
+        
         self.fc = nn.Sequential(
-            nn.Linear(512, latent_dim),
+            nn.Linear(512 + 2, latent_dim),  # Concat position features
             nn.LayerNorm(latent_dim)
         )
         
     def forward(self, x):
         x = self.conv1(x)
+        x = x + self.pos_encoding  # Add position encoding
+        
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
-        x = self.avg_pool(x)
-        x = x.view(x.size(0), -1)
+        
+        feat = self.avg_pool(x)
+        feat = feat.view(feat.size(0), -1)
+        
+        # Get position prediction
+        pos = self.pos_head(feat)
+        
+        # Combine features with position
+        x = torch.cat([feat, pos], dim=1)
         x = self.fc(x)
         return x
 
@@ -173,8 +209,27 @@ class Predictor(nn.Module):
             nn.LayerNorm(latent_dim)
         )
         
+        # Add collision prediction
+        self.collision_head = nn.Sequential(
+            nn.Linear(latent_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+            nn.Sigmoid()
+        )
+        
     def forward(self, state, action):
         x = torch.cat([state, action], dim=-1)
+        feat = self.net(x)
+        
+        # Predict collision probability
+        collision = self.collision_head(feat)
+        
+        # If collision predicted, reduce action magnitude
+        action_scale = 1.0 - 0.9 * collision
+        scaled_action = action * action_scale
+        
+        # Recompute with scaled action
+        x = torch.cat([state, scaled_action], dim=-1)
         return self.net(x)
 
 
