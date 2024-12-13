@@ -3,6 +3,7 @@ import numpy as np
 from torch import nn
 from torch.nn import functional as F
 import torch
+import math  # Add this import
 
 
 def build_mlp(layers_dims: List[int]):
@@ -135,8 +136,8 @@ class Encoder(nn.Module):
             nn.LeakyReLU(0.2, True)
         )
         
-        # Properly initialize position encoding to match feature map size
-        self.register_buffer('pos_encoding', self._create_pos_encoding())
+        # Initialize position encoding after model is created
+        self.register_buffer('pos_encoding', None)
         
         self.layer1 = nn.Sequential(
             ResBlock(64, 128, stride=2),
@@ -171,25 +172,32 @@ class Encoder(nn.Module):
             nn.LayerNorm(latent_dim)
         )
         
-    def _create_pos_encoding(self):
-        """Create position encoding with proper size"""
-        h, w = 32, 32  # Size after first conv layer
-        pos_h = torch.arange(h).float().view(-1, 1).repeat(1, w) / h
-        pos_w = torch.arange(w).float().view(1, -1).repeat(h, 1) / w
+    def _create_pos_encoding(self, x):
+        """Create position encoding matching input feature map size"""
+        _, _, h, w = x.shape  # Get actual dimensions after first conv
+        device = x.device
+        
+        # Create normalized coordinate grid
+        pos_h = torch.arange(h, device=device).float().view(-1, 1).repeat(1, w) / h
+        pos_w = torch.arange(w, device=device).float().view(1, -1).repeat(h, 1) / w
         pos = torch.stack([pos_h, pos_w], dim=0)  # [2, H, W]
         pos = pos.unsqueeze(0)  # [1, 2, H, W]
         
-        # Project to match channel dimension
-        pos = F.conv2d(
-            pos, 
-            torch.randn(64, 2, 1, 1) / math.sqrt(2),
-            padding=0
-        )  # [1, 64, H, W]
+        # Project to match channel dimension using fixed random projection
+        projection = torch.randn(64, 2, 1, 1, device=device) / math.sqrt(2)
+        pos = F.conv2d(pos, projection, padding=0)  # [1, 64, H, W]
+        
         return pos
         
     def forward(self, x):
         x = self.conv1(x)
-        x = x + self.pos_encoding.to(x.device)  # Add position encoding
+        
+        # Create or update position encoding if needed
+        if self.pos_encoding is None or self.pos_encoding.shape[-2:] != x.shape[-2:]:
+            self.pos_encoding = self._create_pos_encoding(x)
+            
+        # Add position encoding
+        x = x + self.pos_encoding.to(x.device)
         
         x = self.layer1(x)
         x = self.layer2(x)
