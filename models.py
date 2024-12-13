@@ -73,28 +73,29 @@ class Encoder(nn.Module):
         super().__init__()
         self.conv = nn.Sequential(
             # Input: [B, 2, 64, 64]
-            nn.Conv2d(2, 32, 3, stride=2, padding=1),    # [B, 32, 32, 32]
+            nn.Conv2d(2, 32, 4, stride=2, padding=1),    # [B, 32, 32, 32]
             nn.BatchNorm2d(32),
             nn.ReLU(True),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1),   # [B, 64, 16, 16]
+            nn.Conv2d(32, 64, 4, stride=2, padding=1),   # [B, 64, 16, 16]
             nn.BatchNorm2d(64),
             nn.ReLU(True),
-            nn.Conv2d(64, 128, 3, stride=2, padding=1),  # [B, 128, 8, 8]
+            nn.Conv2d(64, 128, 4, stride=2, padding=1),  # [B, 128, 8, 8]
             nn.BatchNorm2d(128),
             nn.ReLU(True),
-            nn.Conv2d(128, 256, 3, stride=2, padding=1), # [B, 256, 4, 4]
+            nn.Conv2d(128, 128, 4, stride=2, padding=1), # [B, 128, 4, 4]
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            nn.Conv2d(128, 256, 4, stride=2, padding=1), # [B, 256, 2, 2]
             nn.BatchNorm2d(256),
             nn.ReLU(True),
         )
-        # Calculate correct input size for fc layer: 256 channels * 4 * 4
-        self.fc = nn.Linear(256 * 4 * 4, latent_dim)
+        # Now the flattened size is 256 * 2 * 2 = 1024
+        self.fc = nn.Linear(1024, latent_dim)
         
     def forward(self, x):
-        # Print shape for debugging
-        B = x.shape[0]
-        x = self.conv(x)  # [B, 256, 4, 4]
-        x = x.reshape(B, -1)  # [B, 256*4*4]
-        x = self.fc(x)
+        x = self.conv(x)  # [B, 256, 2, 2]
+        x = x.reshape(x.size(0), -1)  # [B, 1024]
+        x = self.fc(x)  # [B, 256]
         return x
 
 class Predictor(nn.Module):
