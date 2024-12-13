@@ -255,8 +255,8 @@ class JEPAModel(nn.Module):
         T = actions.shape[1] + 1
         D = self.repr_dim
         
-        # Get initial embedding
-        curr_state, _ = self.encoder(states.squeeze(1))  # [B, D]
+        # Get initial embedding - remove tuple unpacking
+        curr_state = self.encoder(states.squeeze(1))  # [B, D]
         predictions = [curr_state]
         
         # Predict future states
