@@ -23,7 +23,7 @@ def vicreg_loss(x, y):
     cov_y = (y.T @ y) / (y.shape[0] - 1)
     cov_loss = off_diagonal(cov_x).pow_(2).sum() + off_diagonal(cov_y).pow_(2).sum()
     
-    return sim_loss + sim_coef * var_loss + cov_coef * cov_loss
+    return sim_coef * sim_loss + var_coef * var_loss + cov_coef * cov_loss
 
 def off_diagonal(x):
     n = x.shape[0]
@@ -45,7 +45,7 @@ def train(epochs=100):  # 增加训练轮数
     data_path = "/scratch/DL24FA/train"
     train_loader = create_wall_dataloader(
         data_path=data_path,
-        probing=True,  # Changed to True to get locations
+        probing=False,  # Set probing to False to avoid loading 'locations.npy'
         device=device,
         batch_size=batch_size,
         train=True
@@ -119,30 +119,16 @@ def train(epochs=100):  # 增加训练轮数
                 wall_channel = states[:, :, 1:2]  # Get wall channel
                 collision_mask = F.max_pool2d(wall_channel.view(-1, 1, H, W), 3, stride=1, padding=1) > 0.5
                 
-                # Calculate auxiliary position loss
-                if hasattr(batch, 'locations') and batch.locations.numel() > 0:
-                    normalizer = Normalizer()
-                    true_positions = batch.locations
-                    normalized_positions = normalizer.normalize_location(true_positions)
-                    
-                    # Get position predictions from encoder
-                    all_states = states.view(-1, C, H, W)
-                    encoded = model.encoder(all_states)
-                    pos_loss = F.mse_loss(encoded[:, -2:], normalized_positions.view(-1, 2))
-                else:
-                    pos_loss = 0.0
+                # Remove position loss calculation since locations are not available
+                pos_loss = 0.0
                 
                 # Collision-aware prediction loss
                 pred_next = model.predictor(pred_states, actions_flat)
                 pred_collision = model.predictor.collision_head(pred_next)
                 collision_loss = F.binary_cross_entropy(pred_collision, collision_mask.float())
                 
-                # Combined loss
+                # Combined loss without position loss
                 loss = vicreg_loss(pred_next, target_states.detach(), sim_coef=25.0, var_coef=25.0, cov_coef=1.0)
-                if pos_loss != 0.0:
-                    loss = loss + 0.05 * pos_loss  # 减小位置损失的权重
-                # 移除碰撞损失
-                # loss = loss + 0.1 * collision_loss
                 
                 loss = loss / grad_accum_steps  # Scale loss for accumulation
                 loss.backward()
@@ -164,7 +150,6 @@ def train(epochs=100):  # 增加训练轮数
                         tqdm.write(
                             f"[Epoch {epoch}/{epochs}][Batch {batch_idx}/{total_batches}] "
                             f"Loss: {accumulated_loss:.4f}, LR: {curr_lr:.6f}, "
-                            f"Position Loss: {pos_loss if isinstance(pos_loss, float) else pos_loss.item():.4f}, "
                             f"Collision Loss: {collision_loss.item():.4f}"
                         )
                         accumulated_loss = 0
