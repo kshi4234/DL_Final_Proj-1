@@ -5,6 +5,7 @@ from models import JEPAModel
 from tqdm import tqdm
 import random
 import math
+from normalizer import Normalizer  # Add this import
 
 def vicreg_loss(x, y):
     # Invariance loss
@@ -28,7 +29,7 @@ def off_diagonal(x):
     n = x.shape[0]
     return x.flatten()[:-1].view(n-1, n+1)[:, 1:].flatten()
 
-def train(epochs=100):  # Increase epochs significantly
+def train(epochs=1):  # Increase epochs significantly
     device = torch.device("cuda")
     model = JEPAModel().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, weight_decay=0.01)

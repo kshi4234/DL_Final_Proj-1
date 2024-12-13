@@ -135,8 +135,8 @@ class Encoder(nn.Module):
             nn.LeakyReLU(0.2, True)
         )
         
-        # Add position encoding
-        self.pos_encoding = nn.Parameter(torch.randn(1, 64, 32, 32))
+        # Properly initialize position encoding to match feature map size
+        self.register_buffer('pos_encoding', self._create_pos_encoding())
         
         self.layer1 = nn.Sequential(
             ResBlock(64, 128, stride=2),
@@ -171,9 +171,25 @@ class Encoder(nn.Module):
             nn.LayerNorm(latent_dim)
         )
         
+    def _create_pos_encoding(self):
+        """Create position encoding with proper size"""
+        h, w = 32, 32  # Size after first conv layer
+        pos_h = torch.arange(h).float().view(-1, 1).repeat(1, w) / h
+        pos_w = torch.arange(w).float().view(1, -1).repeat(h, 1) / w
+        pos = torch.stack([pos_h, pos_w], dim=0)  # [2, H, W]
+        pos = pos.unsqueeze(0)  # [1, 2, H, W]
+        
+        # Project to match channel dimension
+        pos = F.conv2d(
+            pos, 
+            torch.randn(64, 2, 1, 1) / math.sqrt(2),
+            padding=0
+        )  # [1, 64, H, W]
+        return pos
+        
     def forward(self, x):
         x = self.conv1(x)
-        x = x + self.pos_encoding  # Add position encoding
+        x = x + self.pos_encoding.to(x.device)  # Add position encoding
         
         x = self.layer1(x)
         x = self.layer2(x)
