@@ -39,7 +39,6 @@ class WallDataset:
 
         return WallSample(states=states, locations=locations, actions=actions)
 
-
 def create_wall_dataloader(
     data_path,
     probing=False,
