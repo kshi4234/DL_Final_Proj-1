@@ -87,7 +87,8 @@ def vicreg_loss(x, y, sim_coef=25.0, var_coef=25.0, cov_coef=1.0):
     cov_y = (y.T @ y) / (y.shape[0] - 1)
     cov_loss = off_diagonal(cov_x).pow_(2).sum() + off_diagonal(cov_y).pow_(2).sum()
     
-    return sim_coef * sim_loss + var_coef * var_loss + cov_coef * cov_loss
+    total_loss = sim_coef * sim_loss + var_coef * var_loss + cov_coef * cov_loss
+    return total_loss, sim_loss, var_loss, cov_loss
 
 
 class ResBlock(nn.Module):

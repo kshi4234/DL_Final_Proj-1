@@ -23,7 +23,7 @@ def vicreg_loss(x, y, sim_coef, var_coef, cov_coef):
     cov_y = (y.T @ y) / (y.shape[0] - 1)
     cov_loss = off_diagonal(cov_x).pow_(2).sum() + off_diagonal(cov_y).pow_(2).sum()
     
-    return sim_coef * sim_loss + var_coef * var_loss + cov_coef * cov_loss
+    return sim_coef * sim_loss + var_coef * var_loss + cov_coef * cov_loss, sim_loss, var_loss, cov_loss
 
 def off_diagonal(x):
     n = x.shape[0]
@@ -138,8 +138,15 @@ def train(epochs=1):  # 增加训练轮数
                 # Collision loss
                 collision_loss = F.binary_cross_entropy(pred_collision, collision_mask)
 
-                # Combined loss without position loss
-                loss = vicreg_loss(pred_next, target_states.detach(), sim_coef=25.0, var_coef=25.0, cov_coef=1.0) + collision_loss * collision_loss_weight
+                # Combined loss calculation
+                total_loss, sim_loss, var_loss, cov_loss = vicreg_loss(
+                    pred_next, 
+                    target_states.detach(), 
+                    sim_coef=25.0, 
+                    var_coef=25.0, 
+                    cov_coef=1.0
+                )
+                loss = total_loss + collision_loss * collision_loss_weight
                 
                 loss = loss / grad_accum_steps  # Scale loss for accumulation
                 loss.backward()
@@ -154,6 +161,8 @@ def train(epochs=1):  # 增加训练轮数
                     print(f"Target states shape: {target_states.shape}, range: [{target_states.min():.3f}, {target_states.max():.3f}]")
                     print(f"Predicted next states shape: {pred_next.shape}, range: [{pred_next.min():.3f}, {pred_next.max():.3f}]")
                     print(f"VICReg loss components - sim: {sim_loss.item():.4f}, var: {var_loss.item():.4f}, cov: {cov_loss.item():.4f}")
+                    print(f"Collision loss: {collision_loss.item():.4f}")
+                    print(f"Total loss: {loss.item():.4f}")
                 
                 # Only step optimizer after accumulating gradients
                 if (batch_idx + 1) % grad_accum_steps == 0:
