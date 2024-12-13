@@ -66,3 +66,89 @@ class Prober(torch.nn.Module):
     def forward(self, e):
         output = self.prober(e)
         return output
+
+
+class Encoder(nn.Module):
+    def __init__(self, latent_dim=256):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(2, 32, 3, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(True),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1), 
+            nn.BatchNorm2d(64),
+            nn.ReLU(True),
+            nn.Conv2d(64, 128, 3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(True),
+            nn.Conv2d(128, 256, 3, stride=2, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(True),
+        )
+        self.fc = nn.Linear(256 * 4 * 4, latent_dim)
+        
+    def forward(self, x):
+        x = self.conv(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        return x
+
+class Predictor(nn.Module):
+    def __init__(self, latent_dim=256, action_dim=2):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(latent_dim + action_dim, 512),
+            nn.LayerNorm(512),
+            nn.ReLU(True),
+            nn.Linear(512, 512),
+            nn.LayerNorm(512), 
+            nn.ReLU(True),
+            nn.Linear(512, latent_dim)
+        )
+
+    def forward(self, state, action):
+        x = torch.cat([state, action], dim=-1)
+        return self.net(x)
+
+class JEPAModel(nn.Module):
+    def __init__(self, latent_dim=256):
+        super().__init__()
+        self.encoder = Encoder(latent_dim)
+        self.predictor = Predictor(latent_dim)
+        self.target_encoder = Encoder(latent_dim)
+        self.repr_dim = latent_dim
+        
+        # Initialize target encoder
+        for param_q, param_k in zip(self.encoder.parameters(), 
+                                  self.target_encoder.parameters()):
+            param_k.data.copy_(param_q.data)
+            param_k.requires_grad = False
+            
+    @torch.no_grad()
+    def update_target(self, momentum=0.99):
+        for param_q, param_k in zip(self.encoder.parameters(),
+                                  self.target_encoder.parameters()):
+            param_k.data = momentum * param_k.data + (1.0 - momentum) * param_q.data
+            
+    def forward(self, states, actions):
+        """
+        During inference:
+            states: [B, 1, Ch, H, W] - initial state only
+            actions: [B, T-1, 2] - sequence of actions
+        Returns:
+            predictions: [B, T, D] - predicted representations
+        """
+        B = states.shape[0]
+        T = actions.shape[1] + 1
+        D = self.repr_dim
+        
+        # Get initial embedding
+        curr_state = self.encoder(states.squeeze(1))  # [B, D]
+        predictions = [curr_state]
+        
+        # Predict future states
+        for t in range(T-1):
+            curr_state = self.predictor(curr_state, actions[:, t])
+            predictions.append(curr_state)
+            
+        return torch.stack(predictions, dim=1)  # [B, T, D]
