@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from dataset import create_wall_dataloader
 from models import JEPAModel
 from tqdm import tqdm
+import random
 
 def vicreg_loss(x, y):
     # Invariance loss
@@ -26,10 +27,10 @@ def off_diagonal(x):
     n = x.shape[0]
     return x.flatten()[:-1].view(n-1, n+1)[:, 1:].flatten()
 
-def train(epochs=2):  # Increase epochs
+def train(epochs=50):  # More epochs
     device = torch.device("cuda")
     model = JEPAModel().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)  # Slightly higher learning rate
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.05)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs, eta_min=1e-6)
     
     data_path = "/scratch/DL24FA/train"
@@ -54,6 +55,11 @@ def train(epochs=2):  # Increase epochs
         for batch in pbar_batch:
             states = batch.states
             actions = batch.actions
+            
+            # Add augmentation
+            if random.random() < 0.5:
+                states = torch.flip(states, [3])  # Random horizontal flip
+                actions[:,:,0] = -actions[:,:,0]  # Flip x-direction actions
             
             B, T, C, H, W = states.shape
             

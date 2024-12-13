@@ -68,37 +68,58 @@ class Prober(torch.nn.Module):
         return output
 
 
+def vicreg_loss(x, y, sim_coef=25.0, var_coef=25.0, cov_coef=1.0):
+    """Improved VICReg loss with better coefficients and normalized distance"""
+    # Invariance loss (normalized)
+    sim_loss = F.smooth_l1_loss(F.normalize(x, dim=-1), F.normalize(y, dim=-1))
+    
+    # Variance loss (encourage spread)
+    std_x = torch.sqrt(x.var(dim=0) + 0.0001)
+    std_y = torch.sqrt(y.var(dim=0) + 0.0001)
+    var_loss = torch.mean(F.relu(1 - std_x)) + torch.mean(F.relu(1 - std_y))
+    
+    # Covariance loss (decorrelation)
+    x = x - x.mean(dim=0)
+    y = y - y.mean(dim=0)
+    cov_x = (x.T @ x) / (x.shape[0] - 1)
+    cov_y = (y.T @ y) / (y.shape[0] - 1)
+    cov_loss = off_diagonal(cov_x).pow_(2).sum() + off_diagonal(cov_y).pow_(2).sum()
+    
+    return sim_coef * sim_loss + var_coef * var_loss + cov_coef * cov_loss
+
+
 class Encoder(nn.Module):
     def __init__(self, latent_dim=256):
         super().__init__()
         self.conv = nn.Sequential(
             # Input: [B, 2, 64, 64]
-            nn.Conv2d(2, 32, 4, stride=2, padding=1),    # [B, 32, 32, 32]
-            nn.BatchNorm2d(32),
-            nn.LeakyReLU(0.2, True),
-            nn.Dropout2d(0.1),
-            
-            nn.Conv2d(32, 64, 4, stride=2, padding=1),   # [B, 64, 16, 16]
+            nn.Conv2d(2, 64, 4, stride=2, padding=1),    # More channels
             nn.BatchNorm2d(64),
             nn.LeakyReLU(0.2, True),
             nn.Dropout2d(0.1),
             
-            nn.Conv2d(64, 128, 4, stride=2, padding=1),  # [B, 128, 8, 8]
+            nn.Conv2d(64, 128, 4, stride=2, padding=1),
             nn.BatchNorm2d(128),
             nn.LeakyReLU(0.2, True),
             nn.Dropout2d(0.1),
             
-            nn.Conv2d(128, 256, 4, stride=2, padding=1), # [B, 256, 4, 4]
+            nn.Conv2d(128, 256, 4, stride=2, padding=1),
             nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2, True),
+            nn.Dropout2d(0.1),
+            
+            nn.Conv2d(256, 512, 4, stride=2, padding=1),
+            nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, True),
         )
         
         self.fc = nn.Sequential(
-            nn.Linear(256 * 4 * 4, 512),
-            nn.LayerNorm(512),
+            nn.Linear(512 * 4 * 4, 1024),
+            nn.LayerNorm(1024),
             nn.LeakyReLU(0.2, True),
             nn.Dropout(0.1),
-            nn.Linear(512, latent_dim)
+            nn.Linear(1024, latent_dim),
+            nn.LayerNorm(latent_dim)  # Normalize output
         )
         
     def forward(self, x):
@@ -111,13 +132,16 @@ class Predictor(nn.Module):
     def __init__(self, latent_dim=256, action_dim=2):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(latent_dim + action_dim, 512),
-            nn.LayerNorm(512),
-            nn.ReLU(True),
-            nn.Linear(512, 512),
-            nn.LayerNorm(512), 
-            nn.ReLU(True),
-            nn.Linear(512, latent_dim)
+            nn.Linear(latent_dim + action_dim, 1024),
+            nn.LayerNorm(1024),
+            nn.LeakyReLU(0.2, True),
+            nn.Dropout(0.1),
+            nn.Linear(1024, 1024),
+            nn.LayerNorm(1024),
+            nn.LeakyReLU(0.2, True),
+            nn.Dropout(0.1),
+            nn.Linear(1024, latent_dim),
+            nn.LayerNorm(latent_dim)  # Normalize output
         )
 
     def forward(self, state, action):
