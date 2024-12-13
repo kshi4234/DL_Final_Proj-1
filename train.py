@@ -91,10 +91,15 @@ def train(epochs=100):  # 增加训练轮数
                 if hasattr(torch.cuda, 'empty_cache'):
                     torch.cuda.empty_cache()
                     
-                # Rest of training loop with gradient accumulation
-                states = batch.states
-                actions = batch.actions
-                
+                # Move data to device
+                states = batch.states.to(device)
+                actions = batch.actions.to(device)
+                # If using locations
+                if hasattr(batch, 'locations') and batch.locations.nelement() > 0:
+                    locations = batch.locations.to(device)
+                else:
+                    locations = None
+                    
                 # 调整数据增强策略
                 # 移除随机裁剪和重采样，保留位置信息
                 if random.random() < 0.5:
@@ -106,26 +111,26 @@ def train(epochs=100):  # 增加训练轮数
                 # 移除高斯噪声，避免破坏位置信息
                     
                 B, T, C, H, W = states.shape
-                curr_states = states[:, :-1].contiguous().view(-1, C, H, W)
-                next_states = states[:, 1:].contiguous().view(-1, C, H, W)
+                curr_states = states[:, :-1].contiguous().view(-1, C, H, W)  # Shape: [B*(T-1), C, H, W]
+                next_states = states[:, 1:].contiguous().view(-1, C, H, W)   # Shape: [B*(T-1), C, H, W]
                 
                 pred_states = model.encoder(curr_states)
                 with torch.no_grad():
                     target_states = model.target_encoder(next_states)
                 
-                actions_flat = actions.reshape(-1, 2)
+                actions_flat = actions.reshape(-1, 2)  # Shape: [B*(T-1), 2]
                 
                 # Get wall channel from next states for collision detection
-                wall_channel = next_states[:, 1:2, :, :]  # Shape: [B*T, 1, H, W]
+                wall_channel = next_states[:, 1:2, :, :]  # Shape: [B*(T-1), 1, H, W]
 
                 # Determine if a collision occurred by checking if any wall pixel is present
-                collision_mask = (wall_channel.view(B*T, -1).max(dim=1)[0] > 0).float().unsqueeze(1)  # Shape: [B*T, 1]
+                collision_mask = (wall_channel.view(-1, H * W).max(dim=1)[0] > 0).float().unsqueeze(1)  # Shape: [B*(T-1), 1]
 
                 # Forward pass through predictor
                 pred_next = model.predictor(pred_states, actions_flat)
 
                 # Predict collision probability
-                pred_collision = model.predictor.collision_head(pred_next)  # Shape: [B*T, 1]
+                pred_collision = model.predictor.collision_head(pred_next)  # Shape: [B*(T-1), 1]
 
                 # Collision loss
                 collision_loss = F.binary_cross_entropy(pred_collision, collision_mask)
