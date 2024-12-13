@@ -42,7 +42,7 @@ def train(epochs=1):  # 增加训练轮数
     total_steps = 0  # Will be set after creating dataloader
     
     # Use extremely small batch size to handle memory constraints
-    batch_size = 4  # Drastically reduced batch size
+    batch_size = 32  # Drastically reduced batch size
     grad_accum_steps = 16  # Accumulate for effective batch size of 64
     
     data_path = "/scratch/DL24FA/train"
