@@ -4,6 +4,7 @@ from dataset import create_wall_dataloader
 from models import JEPAModel
 from tqdm import tqdm
 import random
+import math
 
 def vicreg_loss(x, y):
     # Invariance loss
@@ -27,11 +28,17 @@ def off_diagonal(x):
     n = x.shape[0]
     return x.flatten()[:-1].view(n-1, n+1)[:, 1:].flatten()
 
-def train(epochs=50):  # More epochs
+def train(epochs=100):  # Increase epochs significantly
     device = torch.device("cuda")
     model = JEPAModel().to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.05)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, epochs, eta_min=1e-6)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, weight_decay=0.01)
+    warmup_steps = 1000
+    
+    def get_lr(step):
+        if step < warmup_steps:
+            return 2e-4 * step / warmup_steps
+        else:
+            return 2e-4 * 0.5 * (1 + math.cos(math.pi * (step - warmup_steps) / (total_steps - warmup_steps)))
     
     data_path = "/scratch/DL24FA/train"
     train_loader = create_wall_dataloader(
@@ -46,6 +53,8 @@ def train(epochs=50):  # More epochs
     model.train()
     # Add progress bar for epochs
     pbar_epoch = tqdm(range(epochs), desc='Training epochs')
+    total_steps = epochs * len(train_loader)
+    step = 0
     for epoch in pbar_epoch:
         epoch_loss = 0
         num_batches = 0
@@ -56,10 +65,28 @@ def train(epochs=50):  # More epochs
             states = batch.states
             actions = batch.actions
             
-            # Add augmentation
+            # Add more augmentations
             if random.random() < 0.5:
-                states = torch.flip(states, [3])  # Random horizontal flip
-                actions[:,:,0] = -actions[:,:,0]  # Flip x-direction actions
+                states = torch.flip(states, [3])  # Horizontal flip
+                actions[:,:,0] = -actions[:,:,0]
+                
+            if random.random() < 0.3:
+                # Random crop and resize
+                b, t, c, h, w = states.shape
+                states = states.view(-1, c, h, w)
+                crop_size = random.randint(48, 64)
+                i = random.randint(0, h - crop_size)
+                j = random.randint(0, w - crop_size)
+                states = F.interpolate(
+                    states[:, :, i:i+crop_size, j:j+crop_size],
+                    size=(64, 64),
+                    mode='bilinear'
+                )
+                states = states.view(b, t, c, 64, 64)
+                
+            # Add Gaussian noise
+            if random.random() < 0.3:
+                states = states + torch.randn_like(states) * 0.01
             
             B, T, C, H, W = states.shape
             
@@ -91,10 +118,17 @@ def train(epochs=50):  # More epochs
             optimizer.step()
             
             # Update target encoder
-            model.update_target(momentum=0.996)  # Slightly higher momentum
+            curr_lr = get_lr(step)
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = curr_lr
+            
+            # Increase momentum gradually
+            momentum = min(0.996, 0.99 + step/total_steps * 0.006)
+            model.update_target(momentum=momentum)
             
             epoch_loss += loss.item()
             num_batches += 1
+            step += 1
             
             # Update progress bar description with current loss
             pbar_batch.set_postfix({'loss': f'{loss.item():.4f}'})

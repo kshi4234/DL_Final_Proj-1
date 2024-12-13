@@ -69,16 +69,17 @@ class Prober(torch.nn.Module):
 
 
 def vicreg_loss(x, y, sim_coef=25.0, var_coef=25.0, cov_coef=1.0):
-    """Improved VICReg loss with better coefficients and normalized distance"""
     # Invariance loss (normalized)
     sim_loss = F.smooth_l1_loss(F.normalize(x, dim=-1), F.normalize(y, dim=-1))
     
-    # Variance loss (encourage spread)
+    # Variance loss with stronger regularization
     std_x = torch.sqrt(x.var(dim=0) + 0.0001)
     std_y = torch.sqrt(y.var(dim=0) + 0.0001)
-    var_loss = torch.mean(F.relu(1 - std_x)) + torch.mean(F.relu(1 - std_y))
+    var_loss = torch.mean(F.relu(2.0 - std_x)) + torch.mean(F.relu(2.0 - std_y))
     
-    # Covariance loss (decorrelation)
+    # Covariance loss with normalized features
+    x = F.normalize(x, dim=-1)
+    y = F.normalize(y, dim=-1)
     x = x - x.mean(dim=0)
     y = y - y.mean(dim=0)
     cov_x = (x.T @ x) / (x.shape[0] - 1)
@@ -88,65 +89,94 @@ def vicreg_loss(x, y, sim_coef=25.0, var_coef=25.0, cov_coef=1.0):
     return sim_coef * sim_loss + var_coef * var_loss + cov_coef * cov_loss
 
 
+class ResBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, stride=stride, padding=1)
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(out_channels)
+        
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, 1, stride=stride),
+                nn.BatchNorm2d(out_channels)
+            )
+        else:
+            self.shortcut = nn.Identity()
+
+    def forward(self, x):
+        out = F.leaky_relu(self.bn1(self.conv1(x)), 0.2)
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        out = F.leaky_relu(out, 0.2)
+        return out
+
+
 class Encoder(nn.Module):
     def __init__(self, latent_dim=256):
         super().__init__()
-        self.conv = nn.Sequential(
-            # Input: [B, 2, 64, 64]
-            nn.Conv2d(2, 64, 4, stride=2, padding=1),    # More channels
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(2, 64, 7, stride=2, padding=3),
             nn.BatchNorm2d(64),
-            nn.LeakyReLU(0.2, True),
-            nn.Dropout2d(0.1),
-            
-            nn.Conv2d(64, 128, 4, stride=2, padding=1),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.2, True),
-            nn.Dropout2d(0.1),
-            
-            nn.Conv2d(128, 256, 4, stride=2, padding=1),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.2, True),
-            nn.Dropout2d(0.1),
-            
-            nn.Conv2d(256, 512, 4, stride=2, padding=1),
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.2, True),
+            nn.LeakyReLU(0.2, True)
         )
         
+        self.layer1 = nn.Sequential(
+            ResBlock(64, 128, stride=2),
+            ResBlock(128, 128)
+        )
+        
+        self.layer2 = nn.Sequential(
+            ResBlock(128, 256, stride=2),
+            ResBlock(256, 256)
+        )
+        
+        self.layer3 = nn.Sequential(
+            ResBlock(256, 512, stride=2),
+            ResBlock(512, 512)
+        )
+        
+        self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        
         self.fc = nn.Sequential(
-            nn.Linear(512 * 4 * 4, 1024),
-            nn.LayerNorm(1024),
-            nn.LeakyReLU(0.2, True),
-            nn.Dropout(0.1),
-            nn.Linear(1024, latent_dim),
-            nn.LayerNorm(latent_dim)  # Normalize output
+            nn.Linear(512, latent_dim),
+            nn.LayerNorm(latent_dim)
         )
         
     def forward(self, x):
-        x = self.conv(x)
-        x = x.reshape(x.size(0), -1)
+        x = self.conv1(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.avg_pool(x)
+        x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
+
 
 class Predictor(nn.Module):
     def __init__(self, latent_dim=256, action_dim=2):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(latent_dim + action_dim, 1024),
-            nn.LayerNorm(1024),
+            nn.Linear(latent_dim + action_dim, 512),
+            nn.LayerNorm(512),
             nn.LeakyReLU(0.2, True),
             nn.Dropout(0.1),
-            nn.Linear(1024, 1024),
-            nn.LayerNorm(1024),
+            
+            nn.Linear(512, 512),
+            nn.LayerNorm(512),
             nn.LeakyReLU(0.2, True),
             nn.Dropout(0.1),
-            nn.Linear(1024, latent_dim),
-            nn.LayerNorm(latent_dim)  # Normalize output
+            
+            nn.Linear(512, latent_dim),
+            nn.LayerNorm(latent_dim)
         )
-
+        
     def forward(self, state, action):
         x = torch.cat([state, action], dim=-1)
         return self.net(x)
+
 
 class JEPAModel(nn.Module):
     def __init__(self, latent_dim=256):
