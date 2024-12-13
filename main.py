@@ -44,7 +44,7 @@ def load_data(device):
 def load_model():
     """Load or initialize the model."""
     model = JEPAModel()
-    model.load_state_dict(torch.load("model_weights.pth"))
+    model.load_state_dict(torch.load("model_weights.pth", weights_only=True))  # Added weights_only=True
     model = model.to(get_device())
     model.eval()
     return model

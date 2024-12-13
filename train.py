@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from dataset import create_wall_dataloader
 from models import JEPAModel
+from tqdm import tqdm
 
 def vicreg_loss(x, y):
     # Invariance loss
@@ -42,11 +43,15 @@ def train(epochs=2):  # Increase epochs
     best_loss = float('inf')
     
     model.train()
-    for epoch in range(epochs):
+    # Add progress bar for epochs
+    pbar_epoch = tqdm(range(epochs), desc='Training epochs')
+    for epoch in pbar_epoch:
         epoch_loss = 0
         num_batches = 0
         
-        for batch in train_loader:
+        # Add progress bar for batches within each epoch
+        pbar_batch = tqdm(train_loader, desc=f'Epoch {epoch}', leave=False)
+        for batch in pbar_batch:
             states = batch.states
             actions = batch.actions
             
@@ -85,21 +90,28 @@ def train(epochs=2):  # Increase epochs
             epoch_loss += loss.item()
             num_batches += 1
             
-            if num_batches % 200 == 0:
-                print(f"Epoch {epoch}, Batch {num_batches}, Loss: {loss.item():.4f}")
+            # Update progress bar description with current loss
+            pbar_batch.set_postfix({'loss': f'{loss.item():.4f}'})
         
         avg_epoch_loss = epoch_loss / num_batches
-        print(f"Epoch {epoch}, Average Loss: {avg_epoch_loss:.4f}")
+        # Update epoch progress bar description
+        pbar_epoch.set_postfix({'avg_loss': f'{avg_epoch_loss:.4f}'})
         
         # Save best model
         if avg_epoch_loss < best_loss:
             best_loss = avg_epoch_loss
-            torch.save(model.state_dict(), "best_model.pth")
+            torch.save(model.state_dict(), "model_weights.pth")  # Changed from best_model.pth
+            tqdm.write(f"Saved new best model with loss: {best_loss:.4f}")
             
         scheduler.step()
     
-    # Save final model
-    torch.save(model.state_dict(), "final_model.pth")
+    # Save final model only if it's better than the best model
+    final_loss = avg_epoch_loss
+    if final_loss < best_loss:
+        torch.save(model.state_dict(), "model_weights.pth")
+        print(f"Saved final model with loss: {final_loss:.4f}")
+    
+    print("Training completed!")
 
 if __name__ == "__main__":
     train()
