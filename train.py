@@ -47,10 +47,18 @@ def train(epochs=100):
             B, T, C, H, W = states.shape
             
             # Get predicted and target representations
-            # Reshape states to combine batch and time dimensions for encoder
-            pred_states = model.encoder(states[:, :-1].reshape(-1, C, H, W))  # [B*(T-1), D]
+            # Convert states to proper shape for encoder
+            curr_states = states[:, :-1].contiguous()  # [B, T-1, C, H, W]
+            next_states = states[:, 1:].contiguous()   # [B, T-1, C, H, W]
+            
+            # Flatten batch and time dimensions
+            curr_states = curr_states.view(-1, C, H, W)  # [B*(T-1), C, H, W]
+            next_states = next_states.view(-1, C, H, W)  # [B*(T-1), C, H, W]
+            
+            # Get embeddings
+            pred_states = model.encoder(curr_states)  # [B*(T-1), D]
             with torch.no_grad():
-                target_states = model.target_encoder(states[:, 1:].reshape(-1, C, H, W))  # [B*(T-1), D]
+                target_states = model.target_encoder(next_states)  # [B*(T-1), D]
             
             # Reshape actions to match state pairs
             actions_flat = actions.reshape(-1, 2)  # [B*(T-1), 2]
@@ -68,7 +76,8 @@ def train(epochs=100):
             # Update target encoder
             model.update_target()
             
-        print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
+            if epoch % 10 == 0:
+                print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
         
     torch.save(model.state_dict(), "model_weights.pth")
 
