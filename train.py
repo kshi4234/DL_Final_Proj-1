@@ -51,6 +51,10 @@ def train(epochs=50):  # Increase epochs significantly
     best_loss = float('inf')
     step = 0
     
+    # Add these variables for tracking
+    total_batches = len(train_loader)
+    best_epoch_loss = float('inf')
+    
     model.train()
     # Add progress bar for epochs
     pbar_epoch = tqdm(range(epochs), desc='Training epochs')
@@ -61,7 +65,7 @@ def train(epochs=50):  # Increase epochs significantly
         
         # Add progress bar for batches within each epoch
         pbar_batch = tqdm(train_loader, desc=f'Epoch {epoch}', leave=False)
-        for batch in pbar_batch:
+        for batch_idx, batch in enumerate(pbar_batch):
             # Get current learning rate
             if step < warmup_steps:
                 curr_lr = 2e-4 * step / warmup_steps
@@ -151,17 +155,38 @@ def train(epochs=50):  # Increase epochs significantly
             num_batches += 1
             step += 1
             
+            # Print detailed training stats every 300 batches
+            if batch_idx % 300 == 0:
+                tqdm.write(
+                    f"[Epoch {epoch}/{epochs}][Batch {batch_idx}/{total_batches}] "
+                    f"Loss: {loss.item():.4f}, LR: {curr_lr:.6f}, "
+                    f"Position Loss: {pos_loss if isinstance(pos_loss, float) else pos_loss.item():.4f}, "
+                    f"Collision Loss: {collision_loss.item():.4f}"
+                )
+            
             pbar_batch.set_postfix({'loss': f'{loss.item():.4f}', 'lr': f'{curr_lr:.6f}'})
         
         avg_epoch_loss = epoch_loss / num_batches
         pbar_epoch.set_postfix({'avg_loss': f'{avg_epoch_loss:.4f}'})
         
+        # Save best model and print epoch summary
         if avg_epoch_loss < best_loss:
             best_loss = avg_epoch_loss
             torch.save(model.state_dict(), "model_weights.pth")  # Changed from best_model.pth
-            tqdm.write(f"Saved new best model with loss: {best_loss:.4f}")
+            tqdm.write(
+                f"\nEpoch {epoch} Summary:\n"
+                f"Average Loss: {avg_epoch_loss:.4f} (New Best)\n"
+                f"Learning Rate: {curr_lr:.6f}\n"
+            )
+        else:
+            tqdm.write(
+                f"\nEpoch {epoch} Summary:\n"
+                f"Average Loss: {avg_epoch_loss:.4f}\n"
+                f"Learning Rate: {curr_lr:.6f}\n"
+            )
     
-    print("Training completed!")
+    print("\nTraining completed!")
+    print(f"Best loss achieved: {best_loss:.4f}")
 
 if __name__ == "__main__":
     train()
