@@ -38,9 +38,9 @@ def train(epochs=50):  # Increase epochs significantly
     warmup_steps = 1000
     total_steps = 0  # Will be set after creating dataloader
     
-    # Use much smaller batch size and gradient accumulation to handle memory constraints
-    batch_size = 16  # Reduced from 32
-    grad_accum_steps = 4  # Accumulate gradients for effective batch size of 64
+    # Use extremely small batch size to handle memory constraints
+    batch_size = 4  # Drastically reduced batch size
+    grad_accum_steps = 16  # Accumulate for effective batch size of 64
     
     data_path = "/scratch/DL24FA/train"
     train_loader = create_wall_dataloader(
@@ -69,6 +69,7 @@ def train(epochs=50):  # Increase epochs significantly
     for epoch in pbar_epoch:
         epoch_loss = 0
         num_batches = 0
+        optimizer.zero_grad()
         
         # Add progress bar for batches within each epoch
         pbar_batch = tqdm(train_loader, desc=f'Epoch {epoch}', leave=False)
