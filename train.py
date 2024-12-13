@@ -29,10 +29,13 @@ def off_diagonal(x):
     n = x.shape[0]
     return x.flatten()[:-1].view(n-1, n+1)[:, 1:].flatten()
 
-def train(epochs=100):  # 增加训练轮数
+def train(epochs=1):  # 增加训练轮数
     device = torch.device("cuda")
     model = JEPAModel().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
+    
+    # Define loss weights
+    collision_loss_weight = 0.1  # Add this line to define the weight
     
     # Remove scheduler and use custom learning rate adjustment
     warmup_steps = 500  # 减少预热步数，加快学习率上升
