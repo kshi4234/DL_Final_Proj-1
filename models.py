@@ -136,8 +136,8 @@ class Encoder(nn.Module):
             nn.LeakyReLU(0.2, True)
         )
         
-        # Initialize position encoding after model is created
-        self.positional_embedding = nn.Parameter(torch.zeros(1, 64, 32, 32))
+        # Adjust positional embedding to match the output size of conv1
+        self.positional_embedding = nn.Parameter(torch.zeros(1, 64, 33, 33))
         nn.init.uniform_(self.positional_embedding, -0.1, 0.1)
         
         # 调整网络结构以更好地捕获空间特征
@@ -171,6 +171,17 @@ class Encoder(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
+
+
+class Predictor(nn.Module):
+    def __init__(self, latent_dim=256, action_dim=2):
+        super().__init__()
+        self.net = nn.Sequential(
+        y_embed = torch.linspace(0, 1, steps=height, device=device).unsqueeze(1).repeat(1, width)
+        x_embed = torch.linspace(0, 1, steps=width, device=device).unsqueeze(0).repeat(height, 1)
+        pos_embed = torch.stack((x_embed, y_embed), dim=0)  # Shape: (2, H, W)
+        pos_embed = pos_embed.unsqueeze(0).repeat(1, channels // 2, 1, 1)  # Shape: (1, C, H, W)
+        return pos_embed
 
 
 class Predictor(nn.Module):
