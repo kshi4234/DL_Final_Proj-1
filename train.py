@@ -29,7 +29,7 @@ def off_diagonal(x):
     n = x.shape[0]
     return x.flatten()[:-1].view(n-1, n+1)[:, 1:].flatten()
 
-def train(epochs=1):  # Increase epochs significantly
+def train(epochs=50):  # Increase epochs significantly
     device = torch.device("cuda")
     model = JEPAModel().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4, weight_decay=0.01)
@@ -41,6 +41,7 @@ def train(epochs=1):  # Increase epochs significantly
     data_path = "/scratch/DL24FA/train"
     train_loader = create_wall_dataloader(
         data_path=data_path,
+        probing=True,  # Changed to True to get locations
         device=device,
         batch_size=128,  # Larger batch size
         train=True
@@ -114,14 +115,17 @@ def train(epochs=1):  # Increase epochs significantly
             collision_mask = F.max_pool2d(wall_channel.view(-1, 1, H, W), 3, stride=1, padding=1) > 0.5
             
             # Calculate auxiliary position loss
-            normalizer = Normalizer()
-            true_positions = batch.locations
-            normalized_positions = normalizer.normalize_location(true_positions)
-            
-            # Get position predictions from encoder
-            all_states = states.view(-1, C, H, W)
-            encoded = model.encoder(all_states)
-            pos_loss = F.mse_loss(encoded[:, -2:], normalized_positions.view(-1, 2))
+            if hasattr(batch, 'locations') and batch.locations.numel() > 0:
+                normalizer = Normalizer()
+                true_positions = batch.locations
+                normalized_positions = normalizer.normalize_location(true_positions)
+                
+                # Get position predictions from encoder
+                all_states = states.view(-1, C, H, W)
+                encoded = model.encoder(all_states)
+                pos_loss = F.mse_loss(encoded[:, -2:], normalized_positions.view(-1, 2))
+            else:
+                pos_loss = 0.0
             
             # Collision-aware prediction loss
             pred_next = model.predictor(pred_states, actions_flat)
@@ -129,11 +133,10 @@ def train(epochs=1):  # Increase epochs significantly
             collision_loss = F.binary_cross_entropy(pred_collision, collision_mask.float())
             
             # Combined loss
-            loss = (
-                vicreg_loss(pred_next, target_states.detach()) + 
-                0.1 * pos_loss +
-                0.1 * collision_loss
-            )
+            loss = vicreg_loss(pred_next, target_states.detach())
+            if pos_loss != 0.0:
+                loss = loss + 0.1 * pos_loss
+            loss = loss + 0.1 * collision_loss
             
             optimizer.zero_grad()
             loss.backward()

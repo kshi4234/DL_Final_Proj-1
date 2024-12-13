@@ -207,12 +207,12 @@ class Encoder(nn.Module):
         feat = feat.view(feat.size(0), -1)
         
         # Get position prediction
-        pos = self.pos_head(feat)
+        pos_pred = self.pos_head(feat)  # Store position prediction
         
         # Combine features with position
-        x = torch.cat([feat, pos], dim=1)
+        x = torch.cat([feat, pos_pred], dim=1)
         x = self.fc(x)
-        return x
+        return x  # Only return latent representation for compatibility
 
 
 class Predictor(nn.Module):
@@ -290,7 +290,7 @@ class JEPAModel(nn.Module):
         D = self.repr_dim
         
         # Get initial embedding
-        curr_state = self.encoder(states.squeeze(1))  # [B, D]
+        curr_state, _ = self.encoder(states.squeeze(1))  # [B, D]
         predictions = [curr_state]
         
         # Predict future states

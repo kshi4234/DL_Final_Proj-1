@@ -17,13 +17,11 @@ class WallDataset:
         device="cuda",
     ):
         self.device = device
-        self.states = np.load(f"{data_path}/states.npy", mmap_mode="r")
-        self.actions = np.load(f"{data_path}/actions.npy")
-
-        if probing:
-            self.locations = np.load(f"{data_path}/locations.npy")
-        else:
-            self.locations = None
+        # Always load locations for position prediction
+        self.states = np.array(np.load(f"{data_path}/states.npy", mmap_mode="r")).copy()
+        self.actions = np.array(np.load(f"{data_path}/actions.npy")).copy()
+        self.locations = np.array(np.load(f"{data_path}/locations.npy")).copy()
+        self.probing = probing
 
     def __len__(self):
         return len(self.states)
@@ -31,12 +29,8 @@ class WallDataset:
     def __getitem__(self, i):
         states = torch.from_numpy(self.states[i]).float().to(self.device)
         actions = torch.from_numpy(self.actions[i]).float().to(self.device)
-
-        if self.locations is not None:
-            locations = torch.from_numpy(self.locations[i]).float().to(self.device)
-        else:
-            locations = torch.empty(0).to(self.device)
-
+        locations = torch.from_numpy(self.locations[i]).float().to(self.device)
+        
         return WallSample(states=states, locations=locations, actions=actions)
 
 def create_wall_dataloader(
