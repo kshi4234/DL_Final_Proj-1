@@ -184,8 +184,8 @@ class ProbingEvaluator:
             
             print(f"Epoch {epoch} average probe loss: {np.mean(epoch_losses):.4f}")
 
-                if self.quick_debug and step > 2:
-                    break
+            if self.quick_debug and step > 2:
+            break
 
         return prober
 
