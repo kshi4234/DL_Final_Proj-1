@@ -72,24 +72,28 @@ class Encoder(nn.Module):
     def __init__(self, latent_dim=256):
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(2, 32, 3, stride=2, padding=1),
+            # Input: [B, 2, 64, 64]
+            nn.Conv2d(2, 32, 3, stride=2, padding=1),    # [B, 32, 32, 32]
             nn.BatchNorm2d(32),
             nn.ReLU(True),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1), 
+            nn.Conv2d(32, 64, 3, stride=2, padding=1),   # [B, 64, 16, 16]
             nn.BatchNorm2d(64),
             nn.ReLU(True),
-            nn.Conv2d(64, 128, 3, stride=2, padding=1),
+            nn.Conv2d(64, 128, 3, stride=2, padding=1),  # [B, 128, 8, 8]
             nn.BatchNorm2d(128),
             nn.ReLU(True),
-            nn.Conv2d(128, 256, 3, stride=2, padding=1),
+            nn.Conv2d(128, 256, 3, stride=2, padding=1), # [B, 256, 4, 4]
             nn.BatchNorm2d(256),
             nn.ReLU(True),
         )
+        # Calculate correct input size for fc layer: 256 channels * 4 * 4
         self.fc = nn.Linear(256 * 4 * 4, latent_dim)
         
     def forward(self, x):
-        x = self.conv(x)
-        x = x.view(x.size(0), -1)
+        # Print shape for debugging
+        B = x.shape[0]
+        x = self.conv(x)  # [B, 256, 4, 4]
+        x = x.reshape(B, -1)  # [B, 256*4*4]
         x = self.fc(x)
         return x
 
