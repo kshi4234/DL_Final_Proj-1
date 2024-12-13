@@ -44,13 +44,19 @@ def train(epochs=100):
             states = batch.states  # [B, T, C, H, W]
             actions = batch.actions # [B, T-1, 2]
             
+            B, T, C, H, W = states.shape
+            
             # Get predicted and target representations
-            pred_states = model.encoder(states[:, :-1].reshape(-1, 2, 64, 64))
+            # Reshape states to combine batch and time dimensions for encoder
+            pred_states = model.encoder(states[:, :-1].reshape(-1, C, H, W))  # [B*(T-1), D]
             with torch.no_grad():
-                target_states = model.target_encoder(states[:, 1:].reshape(-1, 2, 64, 64))
+                target_states = model.target_encoder(states[:, 1:].reshape(-1, C, H, W))  # [B*(T-1), D]
+            
+            # Reshape actions to match state pairs
+            actions_flat = actions.reshape(-1, 2)  # [B*(T-1), 2]
             
             # Predict next states
-            pred_next = model.predictor(pred_states, actions.reshape(-1, 2))
+            pred_next = model.predictor(pred_states, actions_flat)
             
             # Compute loss with collapse prevention
             loss = vicreg_loss(pred_next, target_states.detach())
