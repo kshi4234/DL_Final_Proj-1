@@ -115,20 +115,23 @@ def train(epochs=100):  # 增加训练轮数
                 
                 actions_flat = actions.reshape(-1, 2)
                 
-                # Get wall channel from states for collision detection
-                wall_channel = states[:, :, 1:2]  # Get wall channel
-                collision_mask = F.max_pool2d(wall_channel.view(-1, 1, H, W), 3, stride=1, padding=1) > 0.5
-                
-                # Remove position loss calculation since locations are not available
-                pos_loss = 0.0
-                
-                # Collision-aware prediction loss
+                # Get wall channel from next states for collision detection
+                wall_channel = next_states[:, 1:2, :, :]  # Shape: [B*T, 1, H, W]
+
+                # Determine if a collision occurred by checking if any wall pixel is present
+                collision_mask = (wall_channel.view(B*T, -1).max(dim=1)[0] > 0).float().unsqueeze(1)  # Shape: [B*T, 1]
+
+                # Forward pass through predictor
                 pred_next = model.predictor(pred_states, actions_flat)
-                pred_collision = model.predictor.collision_head(pred_next)
-                collision_loss = F.binary_cross_entropy(pred_collision, collision_mask.float())
-                
+
+                # Predict collision probability
+                pred_collision = model.predictor.collision_head(pred_next)  # Shape: [B*T, 1]
+
+                # Collision loss
+                collision_loss = F.binary_cross_entropy(pred_collision, collision_mask)
+
                 # Combined loss without position loss
-                loss = vicreg_loss(pred_next, target_states.detach(), sim_coef=25.0, var_coef=25.0, cov_coef=1.0)
+                loss = vicreg_loss(pred_next, target_states.detach(), sim_coef=25.0, var_coef=25.0, cov_coef=1.0) + collision_loss * collision_loss_weight
                 
                 loss = loss / grad_accum_steps  # Scale loss for accumulation
                 loss.backward()
