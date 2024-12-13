@@ -7,7 +7,7 @@ import random
 import math
 from normalizer import Normalizer  # Add this import
 
-def vicreg_loss(x, y):
+def vicreg_loss(x, y, sim_coef, var_coef, cov_coef):
     # Invariance loss
     sim_loss = F.mse_loss(x, y)
     
