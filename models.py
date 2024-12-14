@@ -113,25 +113,6 @@ def conv_output_size(input_size, kernel_size, stride, padding):
 
 
 class JEPA(nn.Module):
-    """完整的JEPA模型"""
-    def __init__(self, 
-                 repr_dim=256,    
-                 action_dim=2,
-                 latent_dim=32,
-                 use_target_encoder=True):
-        super().__init__()
-        
-        self.repr_dim = repr_dim
-        
-        # 编码器
-        self.encoder = Encoder(output_dim=repr_dim)
-        
-        # 预测器
-        self.predictor = Predictor(state_dim=repr_dim, action_dim=action_dim, latent_dim=latent_dim)
-        
-        # VICReg正则化器
-        self.regularizer = VICRegRegularizer(repr_dim)
-
     def forward(self, states, actions):
         """
         Args:
@@ -141,6 +122,10 @@ class JEPA(nn.Module):
             During inference:
                 states: [B, 1, Ch, H, W]
                 actions: [B, T-1, 2]
+                
+        Returns: 
+            训练模式: predictions [B, T, repr_dim], targets [B, T, repr_dim], reg_loss
+            推理模式: predictions [B, T, repr_dim]  # 注意这里改为T而不是T-1
         """
         B = states.shape[0]
         
@@ -148,18 +133,18 @@ class JEPA(nn.Module):
         if states.shape[1] == 1:
             # 初始编码
             current_state = self.encoder(states[:, 0])  # [B, repr_dim]
-            
-            # 预测T-1步
-            predictions = []
+           
+            # 预测T步
+            predictions = [current_state]  # 从初始状态开始
             for t in range(actions.shape[1]):
                 pred_t, _ = self.predictor(current_state, actions[:, t])
                 predictions.append(pred_t)
                 current_state = pred_t
-            
-            predictions = torch.stack(predictions, dim=1)  # [B, T-1, repr_dim]
+           
+            predictions = torch.stack(predictions, dim=1)  # [B, T, repr_dim]
             return predictions
-
-        # 训练模式
+        
+        # 训练模式代码保持不变
         else:
             T = states.shape[1]
             
@@ -185,7 +170,6 @@ class JEPA(nn.Module):
                     current_state = pred_t
             predictions = torch.stack(predictions, dim=1)  # [B, T-1, repr_dim]
             
-            # 计算正则化loss
             reg_loss = self.regularizer(predictions)
             
             return predictions, targets, reg_loss
