@@ -113,6 +113,24 @@ def conv_output_size(input_size, kernel_size, stride, padding):
 
 
 class JEPA(nn.Module):
+    def __init__(self, repr_dim=256, input_channels=2):
+        super().__init__()
+        self.repr_dim = repr_dim
+        
+        # Initialize components
+        self.encoder = Encoder(
+            input_channels=input_channels,
+            hidden_dim=256,
+            output_dim=repr_dim
+        )
+        
+        self.predictor = Predictor(
+            state_dim=repr_dim,
+            action_dim=2
+        )
+        
+        self.regularizer = VICRegRegularizer(repr_dim)
+
     def forward(self, states, actions):
         """
         Args:
