@@ -8,11 +8,12 @@ from models import JEPA
 import os
 from tqdm import tqdm
 import numpy as np
-
+import math
 def train_jepa(
-    batch_size=64,
-    num_epochs=100,
-    learning_rate=1e-4,
+    batch_size=128,  # 更大的batch size
+    num_epochs=2,  # 更多epochs
+    learning_rate=2e-4,  # 略微提高学习率
+    warmup_epochs=10,  # 添加warmup
     device='cuda',
     save_path='checkpoints',
     repr_dim=256
@@ -28,12 +29,21 @@ def train_jepa(
         device=device
     )
     
+    # 带warmup的学习率调度
+    def get_lr(epoch):
+        if epoch < warmup_epochs:
+            return learning_rate * (epoch + 1) / warmup_epochs
+        else:
+            return learning_rate * 0.5 * (1 + math.cos(math.pi * (epoch - warmup_epochs) / (num_epochs - warmup_epochs)))
     # 初始化模型
     model = JEPA(repr_dim=repr_dim).to(device)
     
-    # 优化器
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    
+    # 优化器 
+    optimizer = optim.AdamW(  # 使用AdamW
+        model.parameters(),
+        lr=learning_rate,
+        weight_decay=1e-4  # 添加weight decay
+    )
     # 学习率调度器
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, 
@@ -55,10 +65,10 @@ def train_jepa(
             predictions, targets, reg_loss = model(batch.states, batch.actions)
             
             # 计算预测损失
-            pred_loss = F.mse_loss(predictions, targets)
+            pred_loss = F.smooth_l1_loss(predictions, targets)  # 使用Huber loss
             
             # 总损失
-            loss = pred_loss + 0.1 * reg_loss  # 可调节正则化强度
+            loss = pred_loss + 0.05 * reg_loss  # 减小正则化强度
             
             # 反向传播
             optimizer.zero_grad()

@@ -68,48 +68,51 @@ class Prober(torch.nn.Module):
         return output
 
 class Encoder(nn.Module):
-    """将输入观察编码为表征"""
     def __init__(self, input_channels=2, hidden_dim=256, output_dim=256):
         super().__init__()
         
-        # 仔细计算每一层的输出维度
-        # 输入: [B, 2, 64, 64]
+        # 更深的CNN backbone
         self.conv = nn.Sequential(
-            # -> [B, 32, 32, 32]
-            nn.Conv2d(input_channels, 32, 4, stride=2, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            
-            # -> [B, 64, 16, 16]
-            nn.Conv2d(32, 64, 4, stride=2, padding=1),
+            # 1st block
+            nn.Conv2d(input_channels, 64, 3, stride=1, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
+            nn.Conv2d(64, 64, 3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
             
-            # -> [B, 128, 8, 8]
-            nn.Conv2d(64, 128, 4, stride=2, padding=1),
+            # 2nd block
+            nn.Conv2d(64, 128, 3, stride=1, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(),
-            
-            # -> [B, 256, 4, 4]
-            nn.Conv2d(128, hidden_dim, 4, stride=2, padding=1),
-            nn.BatchNorm2d(hidden_dim),
+            nn.Conv2d(128, 128, 3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(),
+            nn.MaxPool2d(2),
+            
+            # 3rd block
+            nn.Conv2d(128, 256, 3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.Conv2d(256, 256, 3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
         )
         
-        # 4*4*256 = 4096
-        self.fc = nn.Linear(hidden_dim * 4 * 4, output_dim)
+        self.fc = nn.Sequential(
+            nn.Linear(256 * 8 * 8, 512),
+            nn.LayerNorm(512),
+            nn.ReLU(),
+            nn.Linear(512, output_dim)
+        )
         
     def forward(self, x):
-        # x: [B, C, H, W]
-        h = self.conv(x)  # -> [B, hidden_dim, 4, 4]
-        h = h.reshape(h.shape[0], -1)  # -> [B, hidden_dim * 4 * 4]
-        s = self.fc(h)  # -> [B, output_dim]
+        h = self.conv(x)
+        h = h.reshape(h.shape[0], -1)
+        s = self.fc(h)
         return s
-
-def conv_output_size(input_size, kernel_size, stride, padding):
-    """Helper function to calculate output size of conv layers"""
-    return (input_size + 2*padding - kernel_size) // stride + 1
-
 
 
 class JEPA(nn.Module):
@@ -196,9 +199,31 @@ class Predictor(nn.Module):
     def __init__(self, state_dim=256, action_dim=2, latent_dim=32):
         super().__init__()
         
-        # 状态动作编码器
-        self.net = nn.Sequential(
-            nn.Linear(state_dim + action_dim, 512),
+        # 状态编码器
+        self.state_encoder = nn.Sequential(
+            nn.Linear(state_dim, 512),
+            nn.LayerNorm(512),
+            nn.ReLU(),
+        )
+        
+        # 动作编码器
+        self.action_encoder = nn.Sequential(
+            nn.Linear(action_dim, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+        )
+        
+        # latent变量生成器
+        self.latent_net = nn.Sequential(
+            nn.Linear(512 + 64, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Linear(256, 2 * latent_dim)  # mean和std
+        )
+        
+        # 预测器
+        self.predictor = nn.Sequential(
+            nn.Linear(512 + 64 + latent_dim, 512),
             nn.LayerNorm(512),
             nn.ReLU(),
             nn.Linear(512, 512),
@@ -208,11 +233,21 @@ class Predictor(nn.Module):
         )
         
     def forward(self, state, action, z=None):
-        # state: [B, state_dim]
-        # action: [B, action_dim]
-        x = torch.cat([state, action], dim=1)
-        pred = self.net(x)
-        return pred, None  # 为了简化，暂时不使用latent变量
+        # 编码state和action
+        state_enc = self.state_encoder(state)
+        action_enc = self.action_encoder(action)
+        combined = torch.cat([state_enc, action_enc], dim=1)
+        
+        # 生成或使用latent
+        if z is None:
+            latent_params = self.latent_net(combined)
+            mean = latent_params[:, :self.latent_dim]
+            std = F.softplus(latent_params[:, self.latent_dim:])
+            z = mean + std * torch.randn_like(std) if self.training else mean
+            
+        # 预测下一状态
+        pred = self.predictor(torch.cat([combined, z], dim=1))
+        return pred, z
 
 class VICRegRegularizer(nn.Module):
     """VICReg正则化器防止表征坍缩"""
