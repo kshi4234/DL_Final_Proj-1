@@ -254,38 +254,33 @@ class VICRegRegularizer(nn.Module):
         self.repr_dim = repr_dim
         
     def forward(self, representations):
-        # 方差损失
+        """
+        Args:
+            representations: [B, T, D] or [B, D]
+        """
+        # 如果是3D张量，展平成2D
+        if representations.dim() == 3:
+            B, T, D = representations.shape
+            representations = representations.reshape(-1, D)  # [B*T, D]
+            
+        # 计算每个维度的标准差
         std = torch.sqrt(representations.var(dim=0) + 1e-4)
         var_loss = F.relu(1 - std).mean()
         
-        # 协方差损失
-        cov = (representations - representations.mean(0)).T @ (representations - representations.mean(0))
-        cov = cov / (representations.shape[0] - 1)
-        cov_loss = (cov - torch.eye(self.repr_dim).to(cov.device)).pow(2).sum()
+        # 中心化
+        representations = representations - representations.mean(dim=0, keepdim=True)
+        
+        # 计算协方差矩阵 [D, D]
+        N = representations.shape[0]  # batch size or batch_size * timesteps
+        cov = (representations.T @ representations) / (N - 1)
+        
+        # 与单位矩阵的差异
+        cov_loss = off_diagonal(cov).pow(2).sum()
         
         return var_loss + 0.01 * cov_loss
 
-def train_step(model, batch, optimizer):
-    """单步训练"""
-    states = batch.states  # [B, T, C, H, W]
-    actions = batch.actions  # [B, T-1, 2]
-    
-    # 前向传播
-    predictions, targets, reg_loss = model(states, actions)
-    
-    # 预测损失
-    pred_loss = F.mse_loss(predictions, targets)
-    
-    # 总损失
-    total_loss = pred_loss + reg_loss
-    
-    # 优化
-    optimizer.zero_grad()
-    total_loss.backward()
-    optimizer.step()
-    
-    return {
-        'pred_loss': pred_loss.item(),
-        'reg_loss': reg_loss.item(),
-        'total_loss': total_loss.item()
-    }
+def off_diagonal(x):
+    """返回一个矩阵的非对角线元素"""
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
