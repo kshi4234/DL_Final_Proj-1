@@ -44,7 +44,7 @@ def load_data(device):
 def load_model():
     """Load or initialize the model."""
     # TODO: Replace MockModel with your trained model
-    model = JEPA()
+    model = JEPA(repr_dim=256).to(device)
     return model
 
 

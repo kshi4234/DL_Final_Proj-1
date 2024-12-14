@@ -145,66 +145,89 @@ class Predictor(nn.Module):
 class JEPA(nn.Module):
     """完整的JEPA模型"""
     def __init__(self, 
-                 state_dim=256,
+                 repr_dim=256,    # 添加repr_dim作为属性
                  action_dim=2,
                  latent_dim=32,
                  use_target_encoder=True):
         super().__init__()
         
+        # 保存表征维度作为属性
+        self.repr_dim = repr_dim
+        
         # 编码器
-        self.encoder = Encoder()
+        self.encoder = Encoder(output_dim=repr_dim)
         
         # 目标编码器 (可以和主编码器共享参数)
         if use_target_encoder:
-            self.target_encoder = Encoder()
+            self.target_encoder = Encoder(output_dim=repr_dim)
         else:
             self.target_encoder = self.encoder
             
         # 预测器
-        self.predictor = Predictor(state_dim, action_dim, latent_dim)
+        self.predictor = Predictor(state_dim=repr_dim, action_dim=action_dim, latent_dim=latent_dim)
         
         # VICReg正则化器
-        self.regularizer = VICRegRegularizer(state_dim)
-        
+        self.regularizer = VICRegRegularizer(repr_dim)
+
     def forward(self, states, actions):
         """
         Args:
-            states: [B, T, C, H, W] 
-            actions: [B, T-1, action_dim]
+            During training:
+                states: [B, T, Ch, H, W]
+            During inference:
+                states: [B, 1, Ch, H, W]
+            actions: [B, T-1, 2]
+
         Returns:
-            predictions: [B, T, state_dim]
-            targets: [B, T, state_dim]
-            reg_loss: scalar
+            predictions: [B, T, repr_dim]  # evaluator期望的格式
         """
-        B, T = states.shape[:2]
+        B = states.shape[0]
         
-        # 初始编码
-        init_state = self.encoder(states[:, 0])
-        
-        # 目标编码
-        targets = []
-        for t in range(1, T):
-            target_t = self.target_encoder(states[:, t])
-            targets.append(target_t)
-        targets = torch.stack(targets, dim=1)
-        
-        # 递归预测
-        predictions = []
-        current_state = init_state
-        for t in range(T-1):
-            pred_t, _ = self.predictor(current_state, actions[:, t])
-            predictions.append(pred_t)
-            # 用于下一步预测的状态
-            if self.training:  # teacher forcing
-                current_state = targets[:, t]
-            else:
+        # 如果是推理模式(evaluator调用)
+        if states.shape[1] == 1:
+            # 初始编码
+            current_state = self.encoder(states[:, 0])  # [B, repr_dim]
+            
+            # 使用actions递归预测
+            predictions = []
+            for t in range(actions.shape[1]):
+                pred_t, _ = self.predictor(current_state, actions[:, t])
+                predictions.append(pred_t)
                 current_state = pred_t
-        predictions = torch.stack(predictions, dim=1)
-        
-        # 计算正则化损失
-        reg_loss = self.regularizer(predictions)
-        
-        return predictions, targets, reg_loss
+                
+            predictions = torch.stack(predictions, dim=1)  # [B, T, repr_dim]
+            return predictions
+
+        # 训练模式 
+        else:
+            T = states.shape[1]
+            
+            # 初始编码
+            init_state = self.encoder(states[:, 0])
+            
+            # 目标编码
+            targets = []
+            for t in range(1, T):
+                target_t = self.target_encoder(states[:, t])
+                targets.append(target_t)
+            targets = torch.stack(targets, dim=1)
+            
+            # 递归预测
+            predictions = []
+            current_state = init_state
+            for t in range(T-1):
+                pred_t, _ = self.predictor(current_state, actions[:, t])
+                predictions.append(pred_t)
+                if self.training:
+                    current_state = targets[:, t]  # teacher forcing
+                else:
+                    current_state = pred_t
+            predictions = torch.stack(predictions, dim=1)
+            
+            # 计算正则化损失
+            reg_loss = self.regularizer(predictions)
+            
+            return predictions, targets, reg_loss
 
 class VICRegRegularizer(nn.Module):
     """VICReg正则化器防止表征坍缩"""
