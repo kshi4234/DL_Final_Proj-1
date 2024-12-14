@@ -44,7 +44,18 @@ def load_data(device):
 def load_model():
     """Load or initialize the model."""
     # TODO: Replace MockModel with your trained model
+    # 初始化模型
     model = JEPA(repr_dim=256).to(device)
+    
+    # 加载权重
+    if os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        print(f'Loaded model from epoch {checkpoint["epoch"]} with loss {checkpoint["loss"]:.4f}')
+    else:
+        print('No checkpoint found, using untrained model')
+        
+    model.eval()  # 设置为评估模式
     return model
 
 

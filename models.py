@@ -71,26 +71,44 @@ class Encoder(nn.Module):
     """将输入观察编码为表征"""
     def __init__(self, input_channels=2, hidden_dim=256, output_dim=256):
         super().__init__()
-        # CNN backbone
+        
+        # 仔细计算每一层的输出维度
+        # 输入: [B, 2, 64, 64]
         self.conv = nn.Sequential(
-            nn.Conv2d(input_channels, 32, 3, stride=2, padding=1),
+            # -> [B, 32, 32, 32]
+            nn.Conv2d(input_channels, 32, 4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1),
+            
+            # -> [B, 64, 16, 16]
+            nn.Conv2d(32, 64, 4, stride=2, padding=1),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Conv2d(64, 128, 3, stride=2, padding=1), 
+            
+            # -> [B, 128, 8, 8]
+            nn.Conv2d(64, 128, 4, stride=2, padding=1),
+            nn.BatchNorm2d(128),
             nn.ReLU(),
-            nn.Conv2d(128, hidden_dim, 3, stride=2, padding=1),
+            
+            # -> [B, 256, 4, 4]
+            nn.Conv2d(128, hidden_dim, 4, stride=2, padding=1),
+            nn.BatchNorm2d(hidden_dim),
             nn.ReLU(),
         )
-        # 映射到表征空间
+        
+        # 4*4*256 = 4096
         self.fc = nn.Linear(hidden_dim * 4 * 4, output_dim)
         
     def forward(self, x):
         # x: [B, C, H, W]
-        h = self.conv(x)
-        h = h.reshape(h.shape[0], -1)
-        s = self.fc(h)
-        return s  # [B, output_dim]
+        h = self.conv(x)  # -> [B, hidden_dim, 4, 4]
+        h = h.reshape(h.shape[0], -1)  # -> [B, hidden_dim * 4 * 4]
+        s = self.fc(h)  # -> [B, output_dim]
+        return s
+
+def conv_output_size(input_size, kernel_size, stride, padding):
+    """Helper function to calculate output size of conv layers"""
+    return (input_size + 2*padding - kernel_size) // stride + 1
 
 class Predictor(nn.Module):
     """基于当前表征和动作预测下一个表征"""
