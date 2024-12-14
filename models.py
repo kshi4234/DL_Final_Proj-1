@@ -138,15 +138,9 @@ class JEPA(nn.Module):
             During training:
                 states: [B, T, Ch, H, W]
                 actions: [B, T-1, 2]
-            During inference (evaluator):
+            During inference:
                 states: [B, 1, Ch, H, W]
                 actions: [B, T-1, 2]
-
-        Returns:
-            During training: 
-                predictions, targets, reg_loss
-            During inference:
-                predictions: [B, T-1, repr_dim] 
         """
         B = states.shape[0]
         
@@ -167,8 +161,34 @@ class JEPA(nn.Module):
 
         # 训练模式
         else:
-            # ... 训练相关代码保持不变 ...
-            pass
+            T = states.shape[1]
+            
+            # 初始编码
+            init_state = self.encoder(states[:, 0])  # [B, repr_dim]
+            
+            # 编码目标状态
+            targets = []
+            for t in range(1, T):
+                target_t = self.encoder(states[:, t])  # [B, repr_dim]
+                targets.append(target_t)
+            targets = torch.stack(targets, dim=1)  # [B, T-1, repr_dim]
+            
+            # 预测未来状态
+            predictions = []
+            current_state = init_state
+            for t in range(T-1):
+                pred_t, _ = self.predictor(current_state, actions[:, t])
+                predictions.append(pred_t)
+                if self.training:
+                    current_state = targets[:, t]  # teacher forcing
+                else:
+                    current_state = pred_t
+            predictions = torch.stack(predictions, dim=1)  # [B, T-1, repr_dim]
+            
+            # 计算正则化loss
+            reg_loss = self.regularizer(predictions)
+            
+            return predictions, targets, reg_loss
 
 class Predictor(nn.Module):
     def __init__(self, state_dim=256, action_dim=2, latent_dim=32):
