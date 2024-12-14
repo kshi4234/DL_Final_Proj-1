@@ -198,6 +198,10 @@ class JEPA(nn.Module):
 class Predictor(nn.Module):
     def __init__(self, state_dim=256, action_dim=2, latent_dim=32):
         super().__init__()
+        # 保存维度参数为实例变量
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.latent_dim = latent_dim
         
         # 状态编码器
         self.state_encoder = nn.Sequential(
@@ -206,47 +210,62 @@ class Predictor(nn.Module):
             nn.ReLU(),
         )
         
-        # 动作编码器
+        # 动作编码器 
         self.action_encoder = nn.Sequential(
             nn.Linear(action_dim, 64),
             nn.LayerNorm(64),
             nn.ReLU(),
         )
         
-        # latent变量生成器
+        # latent生成器
         self.latent_net = nn.Sequential(
             nn.Linear(512 + 64, 256),
-            nn.LayerNorm(256),
+            nn.LayerNorm(256), 
             nn.ReLU(),
             nn.Linear(256, 2 * latent_dim)  # mean和std
         )
         
         # 预测器
-        self.predictor = nn.Sequential(
+        self.decoder = nn.Sequential(
             nn.Linear(512 + 64 + latent_dim, 512),
             nn.LayerNorm(512),
             nn.ReLU(),
             nn.Linear(512, 512),
-            nn.LayerNorm(512),
+            nn.LayerNorm(512), 
             nn.ReLU(),
             nn.Linear(512, state_dim)
         )
         
     def forward(self, state, action, z=None):
+        """
+        Args:
+            state: [B, state_dim]
+            action: [B, action_dim]
+            z: [B, latent_dim] or None
+        """
         # 编码state和action
-        state_enc = self.state_encoder(state)
-        action_enc = self.action_encoder(action)
-        combined = torch.cat([state_enc, action_enc], dim=1)
+        state_enc = self.state_encoder(state)  # [B, 512]
+        action_enc = self.action_encoder(action)  # [B, 64]
+        combined = torch.cat([state_enc, action_enc], dim=1)  # [B, 576]
         
         # 生成或使用latent
         if z is None:
-            latent_params = self.latent_net(combined)
-            mean = latent_params[:, :self.latent_dim]
-            std = F.softplus(latent_params[:, self.latent_dim:])
-            z = mean + std * torch.randn_like(std) if self.training else mean
+            # 预测latent分布参数 
+            latent_params = self.latent_net(combined)  # [B, 2*latent_dim]
+            mean = latent_params[:, :self.latent_dim]  # [B, latent_dim]
+            std = F.softplus(latent_params[:, self.latent_dim:])  # [B, latent_dim]
             
+            if self.training:
+                # 训练时采样
+                eps = torch.randn_like(std)  # [B, latent_dim]
+                z = mean + std * eps  # 重参数化采样
+            else:
+                z = mean  # 测试时使用均值
+                
         # 预测下一状态
-        pred = self.predictor(torch.cat([combined, z], dim=1))
+        pred_input = torch.cat([combined, z], dim=1)  # [B, 576 + latent_dim] 
+        pred = self.decoder(pred_input)  # [B, state_dim]
+        
         return pred, z
 
 class VICRegRegularizer(nn.Module):
