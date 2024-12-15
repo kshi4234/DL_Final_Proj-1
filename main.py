@@ -1,7 +1,7 @@
 from dataset import create_wall_dataloader
 from evaluator import ProbingEvaluator
 import torch
-from models import JEPA
+from models import MockModel, JEPAModel
 import glob
 
 
@@ -36,30 +36,50 @@ def load_data(device):
         train=False,
     )
 
-    probe_val_ds = {"normal": probe_val_normal_ds, "wall": probe_val_wall_ds}
+    probe_val_wall_other_ds = create_wall_dataloader(
+        data_path=f"{data_path}/probe_wall_other/val",
+        probing=True,
+        device=device,
+        train=False,
+    )
+
+    probe_val_ds = {
+        "normal": probe_val_normal_ds,
+        "wall": probe_val_wall_ds,
+        "wall_other": probe_val_wall_other_ds,
+    }
 
     return probe_train_ds, probe_val_ds
 
 
+def load_expert_data(device):
+    data_path = "/scratch/DL24FA"
+
+    probe_train_expert_ds = create_wall_dataloader(
+        data_path=f"{data_path}/probe_expert/train",
+        probing=True,
+        device=device,
+        train=True,
+    )
+
+    probe_val_expert_ds = {
+        "expert": create_wall_dataloader(
+            data_path=f"{data_path}/probe_expert/val",
+            probing=True,
+            device=device,
+            train=False,
+        )
+    }
+
+    return probe_train_expert_ds, probe_val_expert_ds
+
+
 def load_model():
     """Load or initialize the model."""
-    import os
-    
-    device = get_device()
-    checkpoint_path = 'checkpoints/best_model.pth'
-    
-    # Initialize model with proper dimensions
-    model = JEPA(repr_dim=256, input_channels=2).to(device)
-    
-    # Load weights if available
-    if os.path.exists(checkpoint_path):
-        checkpoint = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        print(f'Loaded model from epoch {checkpoint["epoch"]} with loss {checkpoint["loss"]:.4f}')
-    else:
-        print('No checkpoint found, using untrained model')
-        
-    model.eval()  # Set to evaluation mode
+    model = JEPAModel()
+    model.load_state_dict(torch.load("model_weights.pth", weights_only=True))  # Added weights_only=True
+    model = model.to(get_device())
+    model.eval()
     return model
 
 
@@ -82,6 +102,13 @@ def evaluate_model(device, model, probe_train_ds, probe_val_ds):
 
 if __name__ == "__main__":
     device = get_device()
-    probe_train_ds, probe_val_ds = load_data(device)
     model = load_model()
+    
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Total Trainable Parameters: {total_params:,}")
+
+    probe_train_ds, probe_val_ds = load_data(device)
     evaluate_model(device, model, probe_train_ds, probe_val_ds)
+
+    probe_train_expert_ds, probe_val_expert_ds = load_expert_data(device)
+    evaluate_model(device, model, probe_train_expert_ds, probe_val_expert_ds)
